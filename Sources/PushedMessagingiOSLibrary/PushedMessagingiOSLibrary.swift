@@ -69,10 +69,10 @@ public class PushedMessaging: NSProxy {
     }
     
     public struct PushedEndpoints {
-        let wsHost: String
-        let tokensHost: String
-        let apiHost: String
-        let pubHost: String
+        public let wsHost: String
+        public let tokensHost: String
+        public let apiHost: String
+        public let pubHost: String
     }
     
     public static var currentEnvironment: PushedEnvironment = .prod

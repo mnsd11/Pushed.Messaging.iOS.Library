@@ -56,7 +56,7 @@ public class PushedMessaging: NSProxy {
         case connecting = "Connecting"
     }
     private static var pushedToken: String?
-    private static let defaultSdkVersion = "iOS Native 1.1.7"
+    private static let defaultSdkVersion = "iOS Native 1.2.0"
     private static var sdkVersion: String = defaultSdkVersion
     private static let operatingSystem = "iOS \(UIDevice.current.systemVersion)"
     
@@ -81,7 +81,7 @@ public class PushedMessaging: NSProxy {
         switch currentEnvironment {
         case .prod:
             return PushedEndpoints(
-                wsHost: "sub.pushed.ru",
+                wsHost: "sub.multipushed.ru",
                 tokensHost: "sub.multipushed.ru",
                 apiHost: "api.multipushed.ru",
                 pubHost: "pub.multipushed.ru"

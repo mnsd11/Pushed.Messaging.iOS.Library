@@ -119,16 +119,41 @@ public class PushedMessaging: NSProxy {
 
         // Suppress notifications already handled via WebSocket
         func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-            // When app is active, forward to original delegate (Flutter plugin) so it can deliver data to Dart,
-            // but suppress the notification banner UI.
+            let isRemotePush = notification.request.trigger is UNPushNotificationTrigger
+
+            // Active + remote APNs: forward to host (e.g. Flutter) but suppress banner UI.
+            // Active + local notification (WebSocket / host-scheduled): respect host delegate options.
             if UIApplication.shared.applicationState == .active {
-                PushedMessagingiOSLibrary.addLog("[Delegate] App active - forwarding to original delegate, suppressing banner")
+                if isRemotePush {
+                    if PushedMessagingiOSLibrary.showAPNSWhenActive {
+                        PushedMessagingiOSLibrary.addLog("[Delegate] App active - showAPNSWhenActive=true, forwarding remote push to original delegate")
+                        if let orig = original, orig.responds(to: #selector(userNotificationCenter(_:willPresent:withCompletionHandler:))) {
+                            orig.userNotificationCenter?(center, willPresent: notification, withCompletionHandler: { options in
+                                completionHandler(options)
+                            })
+                        } else {
+                            completionHandler([.alert, .badge, .sound])
+                        }
+                    } else {
+                        PushedMessagingiOSLibrary.addLog("[Delegate] App active - showAPNSWhenActive=false, suppressing remote push")
+                        if let orig = original, orig.responds(to: #selector(userNotificationCenter(_:willPresent:withCompletionHandler:))) {
+                            orig.userNotificationCenter?(center, willPresent: notification, withCompletionHandler: { _ in
+                                completionHandler([])
+                            })
+                        } else {
+                            completionHandler([])
+                        }
+                    }
+                    return
+                }
+
+                PushedMessagingiOSLibrary.addLog("[Delegate] App active - forwarding local notification to original delegate")
                 if let orig = original, orig.responds(to: #selector(userNotificationCenter(_:willPresent:withCompletionHandler:))) {
-                    orig.userNotificationCenter?(center, willPresent: notification, withCompletionHandler: { _ in
-                        completionHandler([])
-                    })
+                    orig.userNotificationCenter?(center, willPresent: notification, withCompletionHandler: completionHandler)
+                } else if #available(iOS 14.0, *) {
+                    completionHandler([.list, .banner, .badge, .sound])
                 } else {
-                    completionHandler([])
+                    completionHandler([.alert, .badge, .sound])
                 }
                 return
             }
@@ -176,6 +201,12 @@ public class PushedMessaging: NSProxy {
     private static let bgProcessingIdentifier = "ru.pushed.messaging"
     private static let bgRefreshIdentifier = "ru.pushed.messaging.refresh"
     private static var bgTasksEnabled: Bool = true
+
+    /// When `true`, APNs notifications that arrive while the app is active are shown to the user
+    /// (using options from the original delegate, or [.alert, .badge, .sound] as fallback).
+    /// When `false` (default), they are suppressed — the SDK relies on WebSocket delivery instead.
+    /// Set to `true` if your app uses APNs as the primary notification channel without WebSocket deduplication.
+    public static var showAPNSWhenActive: Bool = false
     /// BGTaskScheduler requires handlers to be registered before `application(_:didFinishLaunchingWithOptions:)` returns.
     /// Flutter invokes `setup()` later via the plugin, so registration must happen earlier (see `registerBackgroundTaskHandlersAtLaunch()`).
     private static var didRegisterBackgroundTaskHandlers: Bool = false
@@ -910,6 +941,33 @@ public class PushedMessaging: NSProxy {
     public static func registerBackgroundTaskHandlersAtLaunch() {
         guard !didRegisterBackgroundTaskHandlers else { return }
         didRegisterBackgroundTaskHandlers = true
+
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: bgProcessingIdentifier, using: nil) { task in
+            guard let processingTask = task as? BGProcessingTask else { return }
+
+            addLog("BGProcessingTask execution started")
+
+            processingTask.expirationHandler = {
+                addLog("BGProcessingTask expiration handler invoked - stopping WebSocket connection")
+                pushedService?.stopConnection()
+            }
+
+            guard UserDefaults.standard.bool(forKey: "pushedMessaging.webSocketEnabled") else {
+                addLog("BGProcessingTask skipped — WebSocket disabled")
+                processingTask.setTaskCompleted(success: true)
+                return
+            }
+
+            if let token = getSecToken() ?? pushedToken {
+                pushedService?.startConnection(with: token)
+            }
+
+            if bgTasksEnabled {
+                scheduleBGProcessing()
+            }
+            processingTask.setTaskCompleted(success: true)
+            addLog("BGProcessingTask execution completed")
+        }
 
         BGTaskScheduler.shared.register(forTaskWithIdentifier: bgRefreshIdentifier, using: nil) { task in
             guard let refreshTask = task as? BGAppRefreshTask else { return }

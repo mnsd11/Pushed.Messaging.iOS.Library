@@ -56,7 +56,7 @@ public class PushedMessaging: NSProxy {
         case connecting = "Connecting"
     }
     private static var pushedToken: String?
-    private static let defaultSdkVersion = "iOS Native 1.2.0"
+    private static let defaultSdkVersion = "iOS Native 1.2.1"
     private static var sdkVersion: String = defaultSdkVersion
     private static let operatingSystem = "iOS \(UIDevice.current.systemVersion)"
     
@@ -381,6 +381,7 @@ public class PushedMessaging: NSProxy {
         return cryptData.base64EncodedString()
 
     }
+
     private static func saveSecToken(_ token:String)->Bool{
         addLog("🔍 DEBUG: Save sec token")
         var secToken=aesEncrypty("encrypted:\(token)", key: mainKey, ivkey: "xjPamAwc7QLYQkhm", operation: kCCEncrypt)
@@ -404,6 +405,7 @@ public class PushedMessaging: NSProxy {
         return status == errSecSuccess
         
     }
+    
     private static func getSecToken()->String?{
         addLog("🔍 DEBUG: Get sec token")
         var query: [CFString: Any] = [kSecClass: kSecClassGenericPassword]
@@ -750,8 +752,8 @@ public class PushedMessaging: NSProxy {
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Basic \(loginString)", forHTTPHeaderField: "Authorization")
-        if !mfTraceId.isEmpty {
-            request.setValue(mfTraceId, forHTTPHeaderField: "mf-trace-id")
+        for (key, value) in TraceContext.traceParentHeaders(incomingTraceId: mfTraceId.isEmpty ? nil : mfTraceId) {
+            request.setValue(value, forHTTPHeaderField: key)
         }
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
@@ -760,7 +762,9 @@ public class PushedMessaging: NSProxy {
             }
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
-                addLog("confirmWSDelivery invalid response: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? "(no body)"
+                let sentHeaders = request.allHTTPHeaderFields ?? [:]
+                addLog("confirmWSDelivery invalid response: \((response as? HTTPURLResponse)?.statusCode ?? 0) url=\(url.absoluteString) body=\(body.prefix(500)) headers=\(sentHeaders)")
                 return
             }
             addLog("confirmWSDelivery success")
@@ -768,7 +772,7 @@ public class PushedMessaging: NSProxy {
         task.resume()
     }
 
-    public static func confirmDelivery(messageId: String) {
+    public static func confirmDelivery(messageId: String, mfTraceId: String = "") {
         let clientToken = clientToken ?? getSecToken() ?? ""
         addLog("🔍 DEBUG: confirmDelivery using clientToken: \(clientToken.prefix(8))… (length: \(clientToken.count))")
         let loginString = String(format: "%@:%@", clientToken, messageId).data(using: String.Encoding.utf8)!.base64EncodedString()
@@ -781,6 +785,9 @@ public class PushedMessaging: NSProxy {
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("Basic \(loginString)", forHTTPHeaderField: "Authorization")
+        for (key, value) in TraceContext.traceParentHeaders(incomingTraceId: mfTraceId.isEmpty ? nil : mfTraceId) {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
                 addLog("confirmDelivery error: \(error.localizedDescription)")
@@ -788,7 +795,9 @@ public class PushedMessaging: NSProxy {
             }
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
-                addLog("confirmDelivery invalid response: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
+                let body = data.flatMap { String(data: $0, encoding: .utf8) } ?? "(no body)"
+                let sentHeaders = request.allHTTPHeaderFields ?? [:]
+                addLog("confirmDelivery invalid response: \((response as? HTTPURLResponse)?.statusCode ?? 0) url=\(url.absoluteString) body=\(body.prefix(500)) headers=\(sentHeaders)")
                 return
             }
             addLog("confirmDelivery success")

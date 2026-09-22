@@ -127,10 +127,12 @@ public class APNSService {
         }
     }
     
-    /// Request notification permissions (only if APNS is enabled)
+    /// Request notification permissions (needed by APNS *and* by WebSocket-only mode,
+    /// which shows local notifications via PushedService.showBackgroundNotification)
     public func requestNotificationPermissions() {
-        guard isEnabled else {
-            addLog("APNS disabled - skipping notification permissions request")
+        let webSocketEnabled = UserDefaults.standard.bool(forKey: "pushedMessaging.webSocketEnabled")
+        guard isEnabled || webSocketEnabled else {
+            addLog("APNS and WebSocket both disabled - skipping notification permissions request")
             return
         }
         

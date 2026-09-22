@@ -367,8 +367,11 @@ private extension PushedService {
             
             var request = URLRequest(url: url)
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            for (key, value) in TraceContext.traceParentHeaders() {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
             request.timeoutInterval = 10
-            
+
             socket = WebSocket(request: request)
             socket?.delegate = self
             // Starscream handles ping/pong and keep-alive automatically.
@@ -502,7 +505,7 @@ private extension PushedService {
                     acknowledgeWebSocketDelivery()
                 } else if !isAPNSEnabled {
                     addWSLog("App is in background and APNs is disabled, showing WebSocket notification for message: \(messageId)")
-                    // showBackgroundNotification(json, identifier: messageId)
+                    showBackgroundNotification(json, identifier: messageId)
                     acknowledgeWebSocketDelivery()
                 } else {
                     addWSLog("App is in background and APNs is enabled, suppressing WebSocket notification. Waiting for APNs.")
@@ -536,7 +539,7 @@ private extension PushedService {
                     }
                     
                     let content = UNMutableNotificationContent()
-                    
+
                     if let pushedNotification = messageData["pushedNotification"] as? [String: Any] {
                         content.title = pushedNotification["Title"] as? String ?? "New Message"
                         content.body = pushedNotification["Body"] as? String ?? "You have a new message."
@@ -554,7 +557,7 @@ private extension PushedService {
                         }
                         content.sound = .default
                     }
-                    
+
                     content.userInfo = messageData
                     
                     let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)

@@ -56,7 +56,7 @@ public class PushedMessaging: NSProxy {
         case connecting = "Connecting"
     }
     private static var pushedToken: String?
-    private static let defaultSdkVersion = "iOS Native 1.2.1"
+    private static let defaultSdkVersion = "iOS Native 1.2.2"
     private static var sdkVersion: String = defaultSdkVersion
     private static let operatingSystem = "iOS \(UIDevice.current.systemVersion)"
     
@@ -563,21 +563,23 @@ public class PushedMessaging: NSProxy {
                         return
                     }
 
-                    let tokenToPersist: String
+                    // `/v2/tokens` echoes back the token we sent whenever it exists. A different
+                    // value is not a rotation the server is "suggesting" — it means our token is
+                    // unknown to it, and the server just issued a replacement. Keeping ours would
+                    // leave the client on a token that no longer exists: the WebSocket handshake
+                    // rejects it (ClientTokenNotFound → no 101 → HTTPUpgradeError) and publishes
+                    // to it fail silently with HTTP 200. Always adopt what the server returned.
                     let srvPrefix = String(serverToken.prefix(8))
                     let reqPrefix = tokenSentInRequest.isEmpty ? "(empty)" : String(tokenSentInRequest.prefix(8))
-                    if !tokenSentInRequest.isEmpty, serverToken != tokenSentInRequest {
-                        addLog("🔍 [tokenDiag] response 200: serverToken prefix=\(srvPrefix)… len=\(serverToken.count) != request prefix=\(reqPrefix)… len=\(tokenSentInRequest.count) → PERSIST request token (preserve branch)")
-                        addLog("Pushed: preserving existing clientToken (server suggested rotation; keeping token sent in request, len=\(tokenSentInRequest.count))")
-                        tokenToPersist = tokenSentInRequest
+                    if tokenSentInRequest.isEmpty {
+                        addLog("🔍 [tokenDiag] response 200: empty request token → PERSIST serverToken prefix=\(srvPrefix)… len=\(serverToken.count)")
+                    } else if serverToken != tokenSentInRequest {
+                        addLog("🔍 [tokenDiag] response 200: serverToken prefix=\(srvPrefix)… != request prefix=\(reqPrefix)… → request token is unknown to the server, ADOPTING serverToken")
+                        addLog("Pushed: clientToken replaced by server (previous token no longer exists): \(reqPrefix)… → \(srvPrefix)…")
                     } else {
-                        if tokenSentInRequest.isEmpty {
-                            addLog("🔍 [tokenDiag] response 200: empty request token → PERSIST serverToken prefix=\(srvPrefix)… len=\(serverToken.count)")
-                        } else {
-                            addLog("🔍 [tokenDiag] response 200: serverToken matches request prefix=\(srvPrefix)… → PERSIST same token")
-                        }
-                        tokenToPersist = serverToken
+                        addLog("🔍 [tokenDiag] response 200: serverToken matches request prefix=\(srvPrefix)… → PERSIST same token")
                     }
+                    let tokenToPersist = serverToken
                     addLog("🔍 [tokenDiag] persisted clientToken prefix=\(String(tokenToPersist.prefix(8)))… env=\(currentEnvironment.rawValue)")
 
                     let saveRes=saveSecToken(tokenToPersist)
